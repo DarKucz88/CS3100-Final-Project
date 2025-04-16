@@ -81,7 +81,7 @@
 </head>
 <body>
 <div class="container auth-container">
-
+  <!-- Register Section -->
   <div id="registerSection" class="card shadow p-4 mb-4 section-active">
     <div class="text-center mb-4">
       <i class="fas fa-user-plus fa-3x text-primary mb-3"></i>
@@ -129,6 +129,7 @@
     </form>
   </div>
 
+  <!-- Login Section -->
   <div id="loginSection" class="card p-4 mb-4 hidden">
     <h3 class="text-center mb-3">Login</h3>
     <form id="loginForm">
@@ -141,6 +142,7 @@
     </form>
   </div>
 
+  <!-- Dashboard Section -->
 <div id="dashboardSection" class="card p-4 mb-4 hidden">
   <div class="d-flex justify-content-between align-items-center mb-3">
     <h4>Welcome, <span id="studentName"></span></h4>
@@ -215,6 +217,7 @@
         <label class="form-label"><strong>What this teammate did specifically for the project:</strong></label>
         <textarea class="form-control mb-2" placeholder="Describe contributions..." required></textarea>
     
+        <!-- Numeric grade input -->
         <label class="form-label"><strong>Grade for the teammate (0-100):</strong></label>
         <input type="number" class="form-control mb-2" id="teammateGrade" min="0" max="100" required />
     
