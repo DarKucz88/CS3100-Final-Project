@@ -3,6 +3,29 @@ const cors = require('cors');
 const bcrypt = require('bcrypt');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
+const nodemailer = require('nodemailer');
+require('dotenv').config({ path: path.join(__dirname, '../.env') });
+
+// Email transporter configuration
+const transporter = nodemailer.createTransport({
+  host: 'smtp.gmail.com',  // Hardcode this instead of using env variable for now
+  port: 587,               // Hardcode port
+  secure: false,
+  auth: {
+    user: process.env.MAIL_USER,
+    pass: process.env.MAIL_PASS
+  },
+  debug: true  // Add this for debugging output
+});
+
+// Add this to verify connection at startup
+transporter.verify(function(error, success) {
+  if (error) {
+    console.log('SMTP verification error:', error);
+  } else {
+    console.log('SMTP server is ready to send emails');
+  }
+});
 
 const app = express();
 const PORT = 8000;
@@ -15,7 +38,8 @@ const db = new sqlite3.Database(dbPath, (err) => {
   } else {
     console.log(' Connected to SQLite database.');
   }
-});
+}
+);
 
 // Middleware
 app.use(cors());
@@ -26,8 +50,168 @@ app.get('/', (req, res) => {
   res.status(200).json({ message: 'Backend is running' });
 });
 
+// Global in-memory store for pending registrations
+const pendingRegistrations = {};
 
+// ------------------- REGISTER ENDPOINT -------------------
 
+// Update the /register endpoint to save registration data temporarily rather than inserting right away.
+app.post('/register', async (req, res) => {
+  const { firstName, lastName, email, password, role } = req.body;
+
+  if (!firstName || !lastName || !email || !password || !role) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+  
+  // Enforce .edu email address for both roles if needed
+  if (!email.endsWith('.edu')) {
+    return res.status(400).json({ error: 'Email must end with .edu' });
+  }
+  
+  try {
+    const passwordHash = await bcrypt.hash(password, 10);
+    // Generate a unique verification token
+    const verifyToken = Math.random().toString(36).substring(2, 15) + 
+                        Math.random().toString(36).substring(2, 15);
+    
+    // Save user data temporarily (do not add to tblUsers yet)
+    pendingRegistrations[verifyToken] = {
+      firstName,
+      lastName,
+      email,
+      passwordHash,
+      role
+    };
+    
+    // Build email verification URL
+    const verifyUrl = `http://localhost:${PORT}/verify-email?token=${verifyToken}`;
+    
+    // Send the verification email
+    transporter.sendMail({
+      from: process.env.MAIL_USER,
+      to: email,
+      subject: 'Verify Your Account',
+      html: `
+        <h1>Account Verification</h1>
+        <p>Thank you for registering, ${firstName}!</p>
+        <p>Please verify your email by clicking the link below:</p>
+        <a href="${verifyUrl}" target="_self">Verify Email</a>
+        <p><small>If the link doesn’t work, copy and paste this URL into your browser: ${verifyUrl}</small></p>
+      `
+    }, (emailErr) => {
+      if (emailErr) {
+        console.error('Email sending error:', emailErr);
+        return res.status(500).json({ error: 'Failed to send verification email' });
+      }
+      
+      // Inform the client that the verification email has been sent.
+      res.status(200).json({ message: 'Verification email sent. Please check your email to verify your account.' });
+    });
+    
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to hash password' });
+  }
+});
+
+// ------------------- EMAIL VERIFICATION ENDPOINTS -------------------
+
+/**
+ * Endpoint to verify a user's email address
+ * Uses the token sent in the verification email to activate the user account
+ * 
+ * Request: GET /verify-email?token=<verification_token>
+ * Response: 
+ *   - 200: Email verified successfully
+ *   - 400: Invalid or missing token
+ *   - 500: Server error during verification
+ */
+app.get('/verify-email', (req, res) => {
+  const token = req.query.token;
+
+  if (!token) {
+    return res.status(400).json({ error: 'Verification token is required' });
+  }
+
+  // Look up pending registration data by token
+  const newUser = pendingRegistrations[token];
+  if (!newUser) {
+    return res.status(400).json({ error: 'Invalid or expired verification token' });
+  }
+
+  const sql = `
+    INSERT INTO tblUsers (firstName, lastName, email, passwordHash, role, verified, verifyToken)
+    VALUES (?, ?, ?, ?, ?, 1, NULL)
+  `;
+
+  db.run(sql, [newUser.firstName, newUser.lastName, newUser.email, newUser.passwordHash, newUser.role], function(err) {
+    if (err) {
+      return res.status(500).json({ error: 'Server error during verification' });
+    }
+
+    // Remove the temporary registration data as the user is now verified.
+    delete pendingRegistrations[token];
+
+    // Send a JSON response instead of redirecting.
+    return res.status(200).json({ message: 'Email verified successfully. You can now log in.' });
+  });
+});
+
+/**
+ * Endpoint to resend a verification email to the user
+ * Creates a new verification token and sends a fresh email
+ * 
+ * Request: POST /resend-verification
+ * Body: { email: string }
+ * Response:
+ *   - 200: Verification email sent successfully
+ *   - 400: Email required or no unverified account found
+ *   - 500: Server error or email sending failure
+ */
+app.post('/resend-verification', (req, res) => {
+  const { email } = req.body;
+  
+  if (!email) {
+    return res.status(400).json({ error: 'Email is required' });
+  }
+  
+  // Generate a new verification token
+  const verifyToken = Math.random().toString(36).substring(2, 15) + 
+                       Math.random().toString(36).substring(2, 15);
+  
+  db.run('UPDATE tblUsers SET verifyToken = ? WHERE email = ? AND verified = 0',
+    [verifyToken, email],
+    function(err) {
+      if (err) return res.status(500).json({ error: err.message });
+      
+      if (this.changes === 0) {
+        return res.status(400).json({ 
+          error: 'No unverified account found with this email'
+        });
+      }
+      
+      // Send new verification email
+      const verifyUrl = `http://localhost:${PORT}/verify-email?token=${verifyToken}`;
+      transporter.sendMail({
+        from: process.env.MAIL_USER,
+        to: email,
+        subject: 'Verify Your Account',
+        html: `
+          <h1>Account Verification</h1>
+          <p>Thank you for registering! Please verify your email by clicking the link below:</p>
+          <a href="${verifyUrl}" target="_self">Verify Email</a>
+          <p><small>If the link doesn't work, copy and paste this URL into your browser: ${verifyUrl}</small></p>
+        `
+      }, (emailErr) => {
+        if (emailErr) {
+          console.error('Email sending error:', emailErr);
+          return res.status(500).json({ error: 'Failed to send verification email' });
+        }
+        
+        res.status(200).json({ message: 'Verification email sent' });
+      });
+    }
+  );
+});
 
 // ------------------- USERS (CRUD for tblUsers) -------------------
 
@@ -40,33 +224,41 @@ app.get('/users', (req, res) => {
   });
 });
 
-// POST to create/register a new user in tblUsers
-app.post('/register', async (req, res) => {
-  const { firstName, lastName, email, password, role } = req.body;
-
-  if (!firstName || !lastName || !email || !password || !role) {
-    return res.status(400).json({ error: 'Missing required fields' });
+// User login
+app.post('/login', async (req, res) => {
+  const { email, password } = req.body;
+  
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password are required' });
   }
-
-  if (!email.endsWith('.edu')) {
-    return res.status(400).json({ error: 'Email must end with .edu' });
-  }
-
-  try {
-    const passwordHash = await bcrypt.hash(password, 10);
-    const sql = `
-      INSERT INTO tblUsers (firstName, lastName, email, passwordHash, role)
-      VALUES (?, ?, ?, ?, ?)
-    `;
-    const params = [firstName, lastName, email, passwordHash, role];
-
-    db.run(sql, params, function (err) {
-      if (err) return res.status(500).json({ error: err.message });
-      res.status(201).json({ message: 'User created', userId: this.lastID });
+  
+  const sql = 'SELECT * FROM tblUsers WHERE email = ?';
+  db.get(sql, [email], async (err, user) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!user) return res.status(401).json({ error: 'Invalid email or password' });
+    
+    const passwordMatch = await bcrypt.compare(password, user.passwordHash);
+    if (!passwordMatch) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+    
+    // Check if user's email is verified
+    if (!user.verified) {
+      return res.status(401).json({ 
+        error: 'Email not verified',
+        needsVerification: true
+      });
+    }
+    
+    // Return user info (without password)
+    res.status(200).json({
+      userId: user.userId,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+      role: user.role
     });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to hash password' });
-  }
+  });
 });
 
 //DELETE a user by userId from tblUsers
