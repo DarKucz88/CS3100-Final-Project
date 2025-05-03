@@ -253,10 +253,14 @@ function renameCourse(index) {
 
 // ===== Authentication System =====
 
-// Handle instructor registration form submission
-document.getElementById('registerForm').addEventListener('submit', function(e) {
+// Replace the existing registration event listener
+document.getElementById('registerForm').addEventListener('submit', async function(e) {
   e.preventDefault();
+  
+  const firstName = document.getElementById('firstName').value;
+  const lastName = document.getElementById('lastName').value;
   const email = document.getElementById('email').value;
+  const password = document.getElementById('password').value;
   
   // Validate educational email domain
   if (!email.endsWith('.edu')) {
@@ -269,50 +273,172 @@ document.getElementById('registerForm').addEventListener('submit', function(e) {
     });
   }
   
-  // Store instructor information
-  const instructorData = {
-    firstName: document.getElementById('firstName').value,
-    lastName: document.getElementById('lastName').value,
+  // Create user data for API
+  const userData = {
+    firstName: firstName,
+    lastName: lastName,
     email: email,
-    password: document.getElementById('password').value,
+    password: password,
+    role: 'instructor'
   };
-  localStorage.setItem('instructor', JSON.stringify(instructorData));
   
-  Swal.fire({ 
-    icon: 'success', 
-    title: 'Registration Complete', 
-    text: 'You can now log in.',
-    background: '#f4f6f9',
-    confirmButtonColor: '#4a90e2'
-  }).then(() => showSection('login'));
-});
-
-// Handle instructor login form submission
-document.getElementById('loginForm').addEventListener('submit', function(e) {
-  e.preventDefault();
-  const stored = JSON.parse(localStorage.getItem('instructor'));
-  const email = document.getElementById('loginEmail').value;
-  const password = document.getElementById('loginPassword').value;
-  
-  // Verify credentials
-  if (stored && email === stored.email && password === stored.password) {
-    localStorage.setItem('instructorLoggedIn', true);
-    Swal.fire({ 
-      icon: 'success', 
-      title: 'Login Successful',
-      background: '#f4f6f9',
-      confirmButtonColor: '#4a90e2'
-    }).then(() => showSection('dashboard'));
-  } else {
-    Swal.fire({ 
-      icon: 'error', 
-      title: 'Login Failed', 
-      text: 'Incorrect email or password.',
+  try {
+    const response = await fetch('http://localhost:8000/register', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(userData)
+    });
+    
+    const data = await response.json();
+    
+    if (response.ok) {
+      Swal.fire({
+        icon: 'success',
+        title: 'Registration Successful',
+        text: 'Please check your email to verify your account before logging in.',
+        background: '#f4f6f9',
+        confirmButtonColor: '#4a90e2',
+        allowOutsideClick: false, // Prevent dismissal by clicking outside
+        allowEscapeKey: false,    // Prevent dismissal by Escape key
+        showConfirmButton: true   // Ensure the confirm button appears
+      }).then((result) => {
+        if (result.isConfirmed) {
+          showSection('login');
+        }
+      });
+    } else {
+      Swal.fire({
+        icon: 'error',
+        title: 'Registration Failed',
+        text: data.error || 'An error occurred during registration.',
+        background: '#f4f6f9',
+        confirmButtonColor: '#4a90e2'
+      });
+    }
+  } catch (error) {
+    console.error('Error:', error);
+    Swal.fire({
+      icon: 'error',
+      title: 'Connection Error',
+      text: 'Could not connect to the server. Please try again later.',
       background: '#f4f6f9',
       confirmButtonColor: '#4a90e2'
     });
   }
 });
+
+// Replace the existing login event listener
+document.getElementById('loginForm').addEventListener('submit', async function(e) {
+  e.preventDefault();
+  
+  const email = document.getElementById('loginEmail').value;
+  const password = document.getElementById('loginPassword').value;
+  
+  try {
+    const response = await fetch('http://localhost:8000/login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ email, password })
+    });
+    
+    const data = await response.json();
+    
+    if (response.ok) {
+      // Store user data in localStorage for session management
+      localStorage.setItem('instructor', JSON.stringify(data));
+      localStorage.setItem('instructorLoggedIn', true);
+      
+      Swal.fire({ 
+        icon: 'success', 
+        title: 'Login Successful',
+        background: '#f4f6f9',
+        confirmButtonColor: '#4a90e2'
+      }).then(() => showSection('dashboard'));
+    } else {
+      if (data.needsVerification) {
+        // Email not verified case
+        Swal.fire({
+          icon: 'warning',
+          title: 'Email Not Verified',
+          text: 'Please check your email for a verification link.',
+          showCancelButton: true,
+          confirmButtonText: 'Resend Verification Email',
+          cancelButtonText: 'OK',
+          background: '#f4f6f9',
+          confirmButtonColor: '#4a90e2'
+        }).then((result) => {
+          if (result.isConfirmed) {
+            // Resend verification email
+            resendVerificationEmail(email);
+          }
+        });
+      } else {
+        Swal.fire({ 
+          icon: 'error', 
+          title: 'Login Failed', 
+          text: data.error || 'Invalid email or password.',
+          background: '#f4f6f9',
+          confirmButtonColor: '#4a90e2'
+        });
+      }
+    }
+  } catch (error) {
+    console.error('Error:', error);
+    Swal.fire({ 
+      icon: 'error', 
+      title: 'Connection Error', 
+      text: 'Could not connect to the server. Please try again later.',
+      background: '#f4f6f9',
+      confirmButtonColor: '#4a90e2'
+    });
+  }
+});
+
+// Add a new function to handle resending verification emails
+async function resendVerificationEmail(email) {
+  try {
+    const response = await fetch('http://localhost:8000/resend-verification', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ email })
+    });
+    
+    const data = await response.json();
+    
+    if (response.ok) {
+      Swal.fire({
+        icon: 'success',
+        title: 'Verification Email Sent',
+        text: 'Please check your email inbox for the verification link.',
+        background: '#f4f6f9',
+        confirmButtonColor: '#4a90e2'
+      });
+    } else {
+      Swal.fire({
+        icon: 'error',
+        title: 'Error',
+        text: data.error || 'Failed to resend verification email.',
+        background: '#f4f6f9',
+        confirmButtonColor: '#4a90e2'
+      });
+    }
+  } catch (error) {
+    console.error('Error:', error);
+    Swal.fire({
+      icon: 'error',
+      title: 'Connection Error',
+      text: 'Could not connect to the server. Please try again later.',
+      background: '#f4f6f9',
+      confirmButtonColor: '#4a90e2'
+    });
+  }
+}
 
 // Handle instructor sign out
 function signout() {
