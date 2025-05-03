@@ -11,9 +11,9 @@ const PORT = 8000;
 const dbPath = path.join(__dirname, '../db/platform_data.db');
 const db = new sqlite3.Database(dbPath, (err) => {
   if (err) {
-    console.error('❌ Failed to connect to database:', err.message);
+    console.error(' Failed to connect to database:', err.message);
   } else {
-    console.log('✅ Connected to SQLite database.');
+    console.log(' Connected to SQLite database.');
   }
 });
 
