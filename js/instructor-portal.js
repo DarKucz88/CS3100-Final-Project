@@ -23,19 +23,25 @@ function showSection(section) {
 }
 
 // Refresh dashboard with current course data
-function updateDashboard() {
-  // Load and format courses from localStorage
-  courses = migrateCourseData();
-  
-  // Display instructor name from profile
-  const instructor = JSON.parse(localStorage.getItem('instructor') || '{}');
-  document.getElementById('instructorName').textContent = instructor.firstName || 'Instructor';
-  
-  // Disable add button if course limit reached
-  document.getElementById('addCourseBtn').disabled = courses.length >= MAX_COURSES;
-  
-  // Display courses in grid
-  renderCourses();
+async function updateDashboard() {
+  try {
+    const instructor = JSON.parse(localStorage.getItem('instructor') || '{}');
+    document.getElementById('instructorName').textContent = instructor.firstName || 'Instructor';
+
+    const response = await fetch(`http://localhost:8000/courses?instructorId=${instructor.userId}`);
+    if (!response.ok) throw new Error('Failed to fetch courses');
+
+    courses = await response.json();
+    renderCourses();
+  } catch (error) {
+    console.error('Error updating dashboard:', error);
+    Swal.fire({
+      icon: 'error',
+      title: 'Error',
+      text: 'Failed to load courses. Please try again later.',
+      confirmButtonColor: '#4a90e2',
+    });
+  }
 }
 
 // Display all instructor courses as interactive cards
@@ -86,43 +92,56 @@ function renderCourses() {
 }
 
 // Create a new course
-function addCourse() {
-  // Check if maximum course limit reached
-  if (courses.length >= MAX_COURSES) {
-    return Swal.fire({ 
-      icon: 'error', 
-      title: 'Maximum Reached', 
-      text: 'You can only add up to 12 courses.',
-      background: '#f4f6f9',
-      confirmButtonColor: '#4a90e2'
-    });
-  }
-  
-  // Show dialog to enter course name
+async function addCourse() {
+  const instructor = JSON.parse(localStorage.getItem('instructor') || '{}');
+
   Swal.fire({
     title: 'Enter Course Name',
     input: 'text',
     inputPlaceholder: 'Course Name',
     showCancelButton: true,
-    background: '#f4f6f9',
     confirmButtonColor: '#4a90e2',
     inputValidator: (value) => {
-      if (!value.trim()) {
-        return 'Course name cannot be empty';
-      }
-    }
-  }).then((result) => {
+      if (!value.trim()) return 'Course name cannot be empty';
+    },
+  }).then(async (result) => {
     if (result.isConfirmed && result.value.trim() !== '') {
-      const courseName = result.value.trim();
-      courses.push({ name: courseName });
-      localStorage.setItem('instructorCourses', JSON.stringify(courses));
-      updateDashboard();
+      try {
+        const response = await fetch('http://localhost:8000/courses', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            courseName: result.value.trim(),
+            courseCode: Math.random().toString(36).substring(2, 8).toUpperCase(),
+            instructorId: instructor.userId,
+            term: 'Spring 2025', // Example term, replace as needed
+          }),
+        });
+
+        if (!response.ok) throw new Error('Failed to add course');
+        Swal.fire({
+          icon: 'success',
+          title: 'Course Added',
+          confirmButtonColor: '#4a90e2',
+        });
+        updateDashboard();
+      } catch (error) {
+        console.error('Error adding course:', error);
+        Swal.fire({
+          icon: 'error',
+          title: 'Error',
+          text: 'Failed to add course. Please try again later.',
+          confirmButtonColor: '#4a90e2',
+        });
+      }
     }
   });
 }
 
 // Delete a course
-function removeCourse(index) {
+async function removeCourse(index) {
+  const course = courses[index];
+
   Swal.fire({
     title: 'Remove Course?',
     text: 'Are you sure you want to remove this course?',
@@ -131,12 +150,29 @@ function removeCourse(index) {
     confirmButtonColor: '#e74c3c',
     cancelButtonColor: '#4a90e2',
     confirmButtonText: 'Yes, remove it',
-    background: '#f4f6f9'
-  }).then((result) => {
+  }).then(async (result) => {
     if (result.isConfirmed) {
-      courses.splice(index, 1);
-      localStorage.setItem('instructorCourses', JSON.stringify(courses));
-      updateDashboard();
+      try {
+        const response = await fetch(`http://localhost:8000/courses/${course.courseId}`, {
+          method: 'DELETE',
+        });
+
+        if (!response.ok) throw new Error('Failed to delete course');
+        Swal.fire({
+          icon: 'success',
+          title: 'Course Removed',
+          confirmButtonColor: '#4a90e2',
+        });
+        updateDashboard();
+      } catch (error) {
+        console.error('Error removing course:', error);
+        Swal.fire({
+          icon: 'error',
+          title: 'Error',
+          text: 'Failed to remove course. Please try again later.',
+          confirmButtonColor: '#4a90e2',
+        });
+      }
     }
   });
 }
@@ -219,100 +255,191 @@ function navigateToCourse(courseName, index) {
 }
 
 // Rename an existing course
-function renameCourse(index) {
+async function renameCourse(index) {
   const course = courses[index];
-  const currentName = typeof course === 'string' ? course : course.name;
-  
+
   Swal.fire({
     title: 'Rename Course',
     input: 'text',
-    inputValue: currentName,
+    inputValue: course.courseName,
     inputPlaceholder: 'New Course Name',
     showCancelButton: true,
-    background: '#f4f6f9',
     confirmButtonColor: '#4a90e2',
     inputValidator: (value) => {
-      if (!value.trim()) {
-        return 'Course name cannot be empty';
+      if (!value.trim()) return 'Course name cannot be empty';
+    },
+  }).then(async (result) => {
+    if (result.isConfirmed && result.value.trim() !== '') {
+      try {
+        const response = await fetch(`http://localhost:8000/courses/${course.courseId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ courseName: result.value.trim(), courseCode: course.courseCode, term: course.term }),
+        });
+
+        if (!response.ok) throw new Error('Failed to rename course');
+        Swal.fire({
+          icon: 'success',
+          title: 'Course Renamed',
+          confirmButtonColor: '#4a90e2',
+        });
+        updateDashboard();
+      } catch (error) {
+        console.error('Error renaming course:', error);
+        Swal.fire({
+          icon: 'error',
+          title: 'Error',
+          text: 'Failed to rename course. Please try again later.',
+          confirmButtonColor: '#4a90e2',
+        });
       }
-    }
-  }).then((result) => {
-    if (result.isConfirmed && result.value.trim() !== '' && result.value.trim() !== currentName) {
-      // Convert string course to object if needed
-      if (typeof courses[index] === 'string') {
-        courses[index] = { name: result.value.trim() };
-      } else {
-        courses[index].name = result.value.trim();
-      }
-      
-      localStorage.setItem('instructorCourses', JSON.stringify(courses));
-      updateDashboard();
     }
   });
 }
 
 // ===== Authentication System =====
 
-// Handle instructor registration form submission
-document.getElementById('registerForm').addEventListener('submit', function(e) {
+// Replace the existing registration event listener
+document.getElementById('registerForm').addEventListener('submit', async function (e) {
   e.preventDefault();
-  const email = document.getElementById('email').value;
-  
-  // Validate educational email domain
-  if (!email.endsWith('.edu')) {
-    return Swal.fire({ 
-      icon: 'error', 
-      title: 'Invalid Email', 
-      text: 'Please use a .edu email address.',
-      background: '#f4f6f9',
-      confirmButtonColor: '#4a90e2'
-    });
-  }
-  
-  // Store instructor information
-  const instructorData = {
+
+  const userData = {
     firstName: document.getElementById('firstName').value,
     lastName: document.getElementById('lastName').value,
-    email: email,
+    email: document.getElementById('email').value,
     password: document.getElementById('password').value,
+    role: 'instructor',
   };
-  localStorage.setItem('instructor', JSON.stringify(instructorData));
-  
-  Swal.fire({ 
-    icon: 'success', 
-    title: 'Registration Complete', 
-    text: 'You can now log in.',
-    background: '#f4f6f9',
-    confirmButtonColor: '#4a90e2'
-  }).then(() => showSection('login'));
+
+  try {
+    const response = await fetch('http://localhost:8000/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(userData),
+    });
+
+    const data = await response.json();
+
+    if (response.ok) {
+      Swal.fire({
+        icon: 'success',
+        title: 'Registration Successful',
+        text: 'Please check your email to verify your account.',
+        confirmButtonColor: '#4a90e2',
+      }).then(() => showSection('login'));
+    } else {
+      Swal.fire({
+        icon: 'error',
+        title: 'Registration Failed',
+        text: data.error || 'An error occurred during registration.',
+        confirmButtonColor: '#4a90e2',
+      });
+    }
+  } catch (error) {
+    console.error('Error:', error);
+    Swal.fire({
+      icon: 'error',
+      title: 'Connection Error',
+      text: 'Could not connect to the server. Please try again later.',
+      confirmButtonColor: '#4a90e2',
+    });
+  }
 });
 
-// Handle instructor login form submission
-document.getElementById('loginForm').addEventListener('submit', function(e) {
+// Replace the existing login event listener
+document.getElementById('loginForm').addEventListener('submit', async function (e) {
   e.preventDefault();
-  const stored = JSON.parse(localStorage.getItem('instructor'));
+
   const email = document.getElementById('loginEmail').value;
   const password = document.getElementById('loginPassword').value;
-  
-  // Verify credentials
-  if (stored && email === stored.email && password === stored.password) {
-    localStorage.setItem('instructorLoggedIn', true);
-    Swal.fire({ 
-      icon: 'success', 
-      title: 'Login Successful',
-      background: '#f4f6f9',
-      confirmButtonColor: '#4a90e2'
-    }).then(() => showSection('dashboard'));
-  } else {
-    Swal.fire({ 
-      icon: 'error', 
-      title: 'Login Failed', 
-      text: 'Incorrect email or password.',
+
+  try {
+    const response = await fetch('http://localhost:8000/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+
+    const data = await response.json();
+
+    if (response.ok) {
+      localStorage.setItem('instructor', JSON.stringify(data));
+      localStorage.setItem('instructorLoggedIn', true);
+
+      Swal.fire({
+        icon: 'success',
+        title: 'Login Successful',
+        confirmButtonColor: '#4a90e2',
+      }).then(() => showSection('dashboard'));
+    } else {
+      if (data.needsVerification) {
+        Swal.fire({
+          icon: 'warning',
+          title: 'Email Not Verified',
+          text: 'Please check your email for a verification link.',
+          confirmButtonColor: '#4a90e2',
+        });
+      } else {
+        Swal.fire({
+          icon: 'error',
+          title: 'Login Failed',
+          text: data.error || 'Invalid email or password.',
+          confirmButtonColor: '#4a90e2',
+        });
+      }
+    }
+  } catch (error) {
+    console.error('Error:', error);
+    Swal.fire({
+      icon: 'error',
+      title: 'Connection Error',
+      text: 'Could not connect to the server. Please try again later.',
+      confirmButtonColor: '#4a90e2',
+    });
+  }
+});
+
+// Add a new function to handle resending verification emails
+async function resendVerificationEmail(email) {
+  try {
+    const response = await fetch('http://localhost:8000/resend-verification', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ email })
+    });
+    
+    const data = await response.json();
+    
+    if (response.ok) {
+      Swal.fire({
+        icon: 'success',
+        title: 'Verification Email Sent',
+        text: 'Please check your email inbox for the verification link.',
+        background: '#f4f6f9',
+        confirmButtonColor: '#4a90e2'
+      });
+    } else {
+      Swal.fire({
+        icon: 'error',
+        title: 'Error',
+        text: data.error || 'Failed to resend verification email.',
+        background: '#f4f6f9',
+        confirmButtonColor: '#4a90e2'
+      });
+    }
+  } catch (error) {
+    console.error('Error:', error);
+    Swal.fire({
+      icon: 'error',
+      title: 'Connection Error',
+      text: 'Could not connect to the server. Please try again later.',
       background: '#f4f6f9',
       confirmButtonColor: '#4a90e2'
     });
   }
-});
+}
 
 // Handle instructor sign out
 function signout() {
