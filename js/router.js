@@ -1,6 +1,6 @@
 
 function navigateTo(view) {
-  fetch(`components/${view}`)
+  fetch(`html/${view}`)
     .then(response => response.text())
     .then(html => {
       document.getElementById('app').innerHTML = html;
