@@ -62,31 +62,33 @@ app.post('/register', async (req, res) => {
   if (!firstName || !lastName || !email || !password || !role) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
-  
+
   // Enforce .edu email address for both roles if needed
   if (!email.endsWith('.edu')) {
     return res.status(400).json({ error: 'Email must end with .edu' });
   }
-  
+
   try {
     const passwordHash = await bcrypt.hash(password, 10);
+
     // Generate a unique verification token
-    const verifyToken = Math.random().toString(36).substring(2, 15) + 
+    const verifyToken = Math.random().toString(36).substring(2, 15) +
                         Math.random().toString(36).substring(2, 15);
-    
+
     // Save user data temporarily (do not add to tblUsers yet)
     pendingRegistrations[verifyToken] = {
       firstName,
       lastName,
       email,
       passwordHash,
-      role
+      role,
     };
-    
-    // Build email verification URL
+
+    // Respond to the frontend immediately
+    res.status(200).json({ message: 'Verification email is being sent. Please check your email.' });
+
+    // Send the verification email asynchronously
     const verifyUrl = `http://localhost:${PORT}/verify-email?token=${verifyToken}`;
-    
-    // Send the verification email
     transporter.sendMail({
       from: process.env.MAIL_USER,
       to: email,
@@ -97,19 +99,19 @@ app.post('/register', async (req, res) => {
         <p>Please verify your email by clicking the link below:</p>
         <a href="${verifyUrl}" target="_self">Verify Email</a>
         <p><small>If the link doesn’t work, copy and paste this URL into your browser: ${verifyUrl}</small></p>
-      `
+      `,
     }, (emailErr) => {
       if (emailErr) {
         console.error('Email sending error:', emailErr);
-        return res.status(500).json({ error: 'Failed to send verification email' });
+        
+      } else {
+        console.log(`Verification email sent to ${email}`);
       }
-      
-      // Inform the client that the verification email has been sent.
-      res.status(200).json({ message: 'Verification email sent. Please check your email to verify your account.' });
     });
-    
+
   } catch (error) {
-    res.status(500).json({ error: 'Failed to hash password' });
+    console.error('Error during registration:', error);
+    res.status(500).json({ error: 'Failed to process registration' });
   }
 });
 
